@@ -1,0 +1,16 @@
+# Dependencies
+node_modules/
+
+# Environment files
+.env
+.env.*
+
+# Lock file
+package-lock.json
+
+# Build folders
+dist/
+build/
+
+# Logs
+*.log
