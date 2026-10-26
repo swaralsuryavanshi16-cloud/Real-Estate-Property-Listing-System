@@ -185,7 +185,7 @@ function StatCard({ icon: Icon, label, value, color = 'primary', trend, trendLab
 
 // ─── Enhanced Property Card ──────────────────────────────────────────
 function PropertyCard({ property, featured = false, compact = false, onClick }) {
-  const BASE = import.meta.env.VITE_API_URL?.replace('/api', '') || 'https://realepro.onrender.com';
+  const BASE = import.meta.env.VITE_API_URL?.replace(/\/api\/?$/, '').trim() || 'https://real-estate-property-listing-system.onrender.com';
 
   const rawPath = property.images?.[0]?.path;
   const img = rawPath
@@ -377,7 +377,7 @@ export default function Dashboard() {
         } else if (isBuyer) {
           const [propsRes, statsRes] = await Promise.all([
             getProperties({ limit: 5, sortBy: 'createdAt', order: 'desc' }),
-            axios.get(`https://realepro.onrender.com/api/properties/stats`),
+            axios.get(`https://real-estate-property-listing-system.onrender.com/api/properties/stats`),
           ]);
           setProperties(propsRes.data?.data || propsRes.data || []);
           setTotalProperties(statsRes.data?.data?.totalProperties || statsRes.data?.totalProperties || 0);

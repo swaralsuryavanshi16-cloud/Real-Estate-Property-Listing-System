@@ -10,7 +10,7 @@ import toast from 'react-hot-toast';
 import { updateImageDetails, deleteImage } from '../../api/properties';
 import { motion, AnimatePresence } from 'framer-motion';
 
-const BASE = import.meta.env.VITE_API_URL?.replace('/api', '') || 'https://realepro.onrender.com';
+const BASE = import.meta.env.VITE_API_URL?.replace(/\/api\/?$/, '').trim() || 'https://real-estate-property-listing-system.onrender.com';
 
 // ✅ FIXED: Resolve an image path to a usable <img src>.
 // Images passed in from PropertyDetail are often ALREADY full URLs

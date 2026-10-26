@@ -8,7 +8,7 @@
 // ─── Get Base URL ──────────────────────────────────────────────────────
 const getBaseUrl = () => {
   // Remove any trailing slashes and spaces
-  const url = import.meta.env?.VITE_API_URL?.replace('/api', '')?.trim() || 'https://realepro.onrender.com';
+  const url = import.meta.env?.VITE_API_URL?.replace(/\/api\/?$/, '')?.trim() || 'https://real-estate-property-listing-system.onrender.com';
   return url.replace(/\/$/, ''); // Remove trailing slash
 };
 

@@ -14,7 +14,7 @@ import toast from 'react-hot-toast';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Link } from 'react-router-dom';
 
-const BASE = import.meta.env.VITE_API_URL?.replace('/api', '') || 'https://realepro.onrender.com';
+const BASE = import.meta.env.VITE_API_URL?.replace(/\/api\/?$/, '').trim() || 'https://real-estate-property-listing-system.onrender.com';
 
 // ✅ Add missing import for ShoppingBag
 import { ShoppingBag } from 'lucide-react';

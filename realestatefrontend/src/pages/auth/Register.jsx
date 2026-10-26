@@ -13,9 +13,10 @@ import AuthFooter from "../../components/layout/AuthFooter";
 import { motion } from "framer-motion";
 
 const API_BASE = import.meta.env.VITE_API_URL || (
-  import.meta.env.PROD ? "https://realepro.onrender.com/api" : "http://localhost:5000/api"
+  import.meta.env.PROD ? "https://real-estate-property-listing-system.onrender.com/api" : "http://localhost:5000/api"
 );
-const API = API_BASE + "/auth";
+const normalizedApiBase = API_BASE.trim().replace(/\/+$/, '');
+const API = `${/\/api$/i.test(normalizedApiBase) ? normalizedApiBase : `${normalizedApiBase}/api`}/auth`;
 
 export default function Register() {
   const navigate = useNavigate();

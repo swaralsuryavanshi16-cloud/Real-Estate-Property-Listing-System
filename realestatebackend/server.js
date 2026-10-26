@@ -80,7 +80,11 @@ const allowedOrigins = [
   "http://127.0.0.1:5173",
   "http://127.0.0.1:5174",
   "https://realepro-9g99aio8i-squad-tech.vercel.app",
-  "https://realepro.vercel.app"
+  "https://realepro.vercel.app",
+  "https://real-estate-property-listing-system-alpha.vercel.app",
+  ...(process.env.CORS_ORIGINS || '').split(',').map((origin) => origin.trim()).filter(Boolean),
+  process.env.FRONTEND_URL?.trim(),
+  process.env.CLIENT_URL?.trim(),
 ];
 
 const isAllowedOrigin = (origin) => {

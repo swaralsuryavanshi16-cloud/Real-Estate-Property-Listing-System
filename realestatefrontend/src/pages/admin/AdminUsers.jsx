@@ -10,7 +10,7 @@ import {
 import toast from 'react-hot-toast';
 import { motion, AnimatePresence } from 'framer-motion';
 
-const BASE = import.meta.env.VITE_API_URL?.replace('/api', '') || 'https://realepro.onrender.com';
+const BASE = import.meta.env.VITE_API_URL?.replace(/\/api\/?$/, '').trim() || 'https://real-estate-property-listing-system.onrender.com';
 
 // ─── User Detail Modal ──────────────────────────────────────────────────
 function UserDetailModal({ userId, onClose }) {

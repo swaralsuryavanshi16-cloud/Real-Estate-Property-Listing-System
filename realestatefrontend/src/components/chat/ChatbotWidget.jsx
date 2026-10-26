@@ -35,7 +35,7 @@ import { sendChatMessage } from '../../api/chatbot';
 import { useAuth } from '../../context/AuthContext';
 import { resolveImageUrl } from '../../utils/imageUtils';
 
-const BASE = import.meta.env.VITE_API_URL?.replace('/api', '') || 'https://realepro.onrender.com';
+const BASE = import.meta.env.VITE_API_URL?.replace(/\/api\/?$/, '').trim() || 'https://real-estate-property-listing-system.onrender.com';
 
 const SUGGESTIONS_BY_ROLE = {
   buyer: [

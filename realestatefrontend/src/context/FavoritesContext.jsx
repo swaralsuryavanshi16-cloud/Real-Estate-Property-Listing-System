@@ -9,7 +9,9 @@ export const FavoritesProvider = ({ children }) => {
   const [favorites, setFavorites] = useState([]);
   const [loading, setLoading] = useState(false);
 
-  const API_URL = import.meta.env.VITE_API_URL || ' https://realepro.onrender.com/api';
+  const configuredApiUrl = import.meta.env.VITE_API_URL || 'https://real-estate-property-listing-system.onrender.com/api';
+  const normalizedApiUrl = configuredApiUrl.trim().replace(/\/+$/, '');
+  const API_URL = /\/api$/i.test(normalizedApiUrl) ? normalizedApiUrl : `${normalizedApiUrl}/api`;
 
   const getHeaders = () => {
     const token = localStorage.getItem('re_token');

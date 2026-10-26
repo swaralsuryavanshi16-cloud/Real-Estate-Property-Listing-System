@@ -6,11 +6,14 @@ import axios from "axios";
 const ENVIRONMENT = import.meta.env.MODE || 'development';
 const IS_DEV = ENVIRONMENT === 'development';
 const API_URL = import.meta.env.VITE_API_URL || (
-  import.meta.env.PROD ? "https://realepro.onrender.com/api" : "http://localhost:5000/api"
+  import.meta.env.PROD ? "https://real-estate-property-listing-system.onrender.com/api" : "http://localhost:5000/api"
 );
 
-// Clean the URL (remove trailing slash and trim whitespace)
-const cleanApiUrl = API_URL.replace(/\/$/, '').trim();
+// Normalize the URL so deployments may provide either the API root or its /api path.
+const normalizedApiUrl = API_URL.trim().replace(/\/+$/, '');
+const cleanApiUrl = /\/api$/i.test(normalizedApiUrl)
+  ? normalizedApiUrl
+  : `${normalizedApiUrl}/api`;
 
 console.log(`🔌 API Base URL (${ENVIRONMENT}):`, cleanApiUrl);
 

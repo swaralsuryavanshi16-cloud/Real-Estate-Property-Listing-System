@@ -3,11 +3,15 @@ import axios from 'axios';
 
 // Get API URL from environment with proper fallback
 const API_URL = import.meta.env.VITE_API_URL || (
-  import.meta.env.PROD ? 'https://realepro.onrender.com/api' : 'http://localhost:5000/api'
+  import.meta.env.PROD ? 'https://real-estate-property-listing-system.onrender.com/api' : 'http://localhost:5000/api'
 );
+const normalizedApiUrl = API_URL.trim().replace(/\/+$/, '');
+const baseURL = /\/api$/i.test(normalizedApiUrl)
+  ? normalizedApiUrl
+  : `${normalizedApiUrl}/api`;
 
 const api = axios.create({
-  baseURL: API_URL,
+  baseURL,
   timeout: 30000,
   headers: {
     'Content-Type': 'application/json',
@@ -54,4 +58,4 @@ api.interceptors.response.use(
   }
 );
 
-export { api, API_URL };
+export { api, API_URL: baseURL };
