@@ -5,20 +5,18 @@ import api from "./axios";
 export const login = (data) =>
   api.post("/auth/login", data);
 
-// ============== OLD REGISTER ==============
+// ================= REGISTER =================
 
 export const register = (data) =>
   api.post("/auth/register", data);
 
-// ============== SEND OTP ==================
+// ============== PASSWORD RESET ==============
 
-export const sendOTP = (email) =>
-  api.post("/auth/send-otp", { email });
+export const forgotPassword = (email) =>
+  api.post("/auth/forgot-password", { email });
 
-// ============== VERIFY OTP ================
-
-export const verifyOTP = (data) =>
-  api.post("/auth/verify-otp", data);
+export const resetPassword = (data) =>
+  api.post("/auth/reset-password", data);
 
 // ============== PROFILE ===================
 
@@ -26,11 +24,7 @@ export const getMe = () =>
   api.get("/auth/me");
 
 export const updateProfile = (data) =>
-  api.put("/auth/updateprofile", data, {
-    headers: {
-      "Content-Type": "multipart/form-data",
-    },
-  });
+  api.put("/auth/updateprofile", data);
 
 export const changePassword = (data) =>
   api.put("/auth/changepassword", data);

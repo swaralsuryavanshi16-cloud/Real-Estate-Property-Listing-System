@@ -1,4 +1,4 @@
-const otpGenerator = require("otp-generator");
+/*const otpGenerator = require("otp-generator");
 const Otp = require("../models/Otp");
 const User = require("../models/User");
 const transporter = require("../config/mailer");
@@ -520,4 +520,4 @@ exports.resetPassword = async (req, res) => {
 
   }
 
-};
+};*/

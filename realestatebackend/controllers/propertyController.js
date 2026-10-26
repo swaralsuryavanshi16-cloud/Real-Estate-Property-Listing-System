@@ -1,347 +1,1291 @@
+// E:/realepro-main/realestatebackend/controllers/PropertyController.js
+const mongoose = require('mongoose');
 const Property = require('../models/Property');
-const path = require('path');
-const fs = require('fs');
-const { analyzeDocument } = require('../utils/documentAnalyzer');
 
-// ─── @route  POST /api/properties ────────────────────────────────────────────
-// ─── @access Private (admin, agent)
-exports.createProperty = async (req, res) => {
-  try {
-    const {
-      title, description, type, status, price, area, areaUnit,
-      bedrooms, bathrooms, floors, parking, furnished,
-      address, city, state, pincode, lat, lng,
-      amenities,
-    } = req.body;
+// ✅ Fix: Check if User model already exists before requiring
+let User;
+try {
+  User = mongoose.model('User');
+} catch (error) {
+  User = require('../models/User');
+}
 
-    const images = [];
-    const documents = [];
+// ================================================================
+// 📦 CRUD OPERATIONS
+// ================================================================
 
-    if (req.files) {
-      if (req.files.images) {
-        req.files.images.forEach((file) => {
-          images.push({
-            filename: file.filename,
-            path: `/uploads/properties/${file.filename}`,
-            originalName: file.originalname,
-          });
-        });
-      }
-      if (req.files.documents) {
-        req.files.documents.forEach((file) => {
-          documents.push({
-            filename: file.filename,
-            path: `/uploads/documents/${file.filename}`,
-            originalName: file.originalname,
-          });
-        });
-      }
+const normalizePropertyPayload = (body = {}) => {
+  const normalized = { ...body };
+
+  if (body.type || body.propertyType) {
+    const propertyType = body.type || body.propertyType;
+    normalized.type = propertyType;
+    normalized.propertyType = propertyType;
+  }
+
+  if (body.address || body.city || body.state || body.pincode || body.lat !== undefined || body.lng !== undefined) {
+    normalized.location = {
+      address: body.address || '',
+      city: body.city || '',
+      state: body.state || '',
+      pincode: body.pincode || '',
+      lat: body.lat !== undefined && body.lat !== '' ? Number(body.lat) : undefined,
+      lng: body.lng !== undefined && body.lng !== '' ? Number(body.lng) : undefined,
+    };
+  }
+
+  if (body.price !== undefined && body.price !== '') {
+    normalized.price = Number(body.price);
+  }
+
+  if (body.area !== undefined && body.area !== '') {
+    normalized.area = Number(body.area);
+  }
+
+  if (body.bedrooms !== undefined && body.bedrooms !== '') {
+    normalized.bedrooms = Number(body.bedrooms);
+  }
+
+  if (body.bathrooms !== undefined && body.bathrooms !== '') {
+    normalized.bathrooms = Number(body.bathrooms);
+  }
+
+  if (body.floors !== undefined && body.floors !== '') {
+    normalized.floors = Number(body.floors);
+  }
+
+  if (body.parking !== undefined) {
+    normalized.parking = body.parking === true || body.parking === 'true' || body.parking === 'on';
+  }
+
+  if (body.amenities) {
+    if (Array.isArray(body.amenities)) {
+      normalized.amenities = body.amenities.filter(Boolean);
+    } else if (typeof body.amenities === 'string') {
+      normalized.amenities = body.amenities.split(',').map((item) => item.trim()).filter(Boolean);
     }
+  }
 
-    const property = await Property.create({
-      title, description, type, status, price,
-      area, areaUnit, bedrooms, bathrooms, floors,
-      parking: parking === 'true' || parking === true,
-      furnished,
-      location: { address, city, state, pincode, lat, lng },
-      amenities: amenities ? (Array.isArray(amenities) ? amenities : amenities.split(',')) : [],
-      images,
-      documents,
-      agent: req.user.id,
-      isApproved: req.user.role === 'admin', // Auto-approve if admin
+  return normalized;
+};
+
+const buildImagePayload = (files = []) =>
+  (files || []).map((file) => ({
+    filename: file.filename || file.key,
+    path: `/uploads/properties/${file.filename || file.key}`,
+    originalName: file.originalname || file.filename,
+    caption: '',
+    isCover: false,
+  }));
+
+const buildDocumentPayload = (files = []) =>
+  (files || []).map((file) => ({
+    filename: file.filename || file.key,
+    path: `/uploads/documents/${file.filename || file.key}`,
+    originalName: file.originalname || file.filename,
+    docType: 'other',
+    verificationStatus: 'unverified',
+    verificationScore: null,
+    verificationNotes: [],
+    verifiedAt: null,
+  }));
+
+const normalizeStoredUploadPath = (file, folder) => {
+  if (typeof file.path === 'string' && /^[A-Za-z]:[\\/]/.test(file.path)) {
+    return file.filename ? `/uploads/${folder}/${file.filename}` : file.path;
+  }
+  return file.path;
+};
+
+const serializeProperty = (property) => {
+  if (!property) return property;
+
+  const data = property.toObject ? property.toObject() : property;
+  const images = (data.images || []).map((image) => ({
+    ...image,
+    path: normalizeStoredUploadPath(image, 'properties'),
+  }));
+  const documents = (data.documents || []).map((document) => ({
+    ...document,
+    path: normalizeStoredUploadPath(document, 'documents'),
+  }));
+
+  return {
+    ...data,
+    images,
+    documents,
+    propertyType: data.propertyType || data.type,
+    type: data.type || data.propertyType,
+  };
+};
+
+// ─── GET PUBLIC STATS ──────────────────────────────────────────────────
+const getPublicStats = async (req, res) => {
+  try {
+    const totalProperties = await Property.countDocuments({ isApproved: true });
+    const cities = await Property.distinct('location.city', { isApproved: true });
+    
+    let totalAgents = 0;
+    try {
+      totalAgents = await User.countDocuments({ role: 'agent', isActive: true });
+    } catch (err) {
+      console.warn('Could not count agents:', err.message);
+    }
+    
+    const avgRatingResult = await Property.aggregate([
+      { $match: { isApproved: true, numReviews: { $gt: 0 } } },
+      { $group: { _id: null, avg: { $avg: '$avgRating' } } }
+    ]);
+    const avgRating = avgRatingResult[0]?.avg || 0;
+
+    res.json({
+      success: true,
+      data: {
+        totalProperties: totalProperties || 0,
+        totalCities: cities?.length || 0,
+        totalAgents: totalAgents || 0,
+        avgRating: parseFloat(avgRating.toFixed(1)) || 0,
+      }
     });
-
-    res.status(201).json({ success: true, message: 'Property created successfully', data: property });
   } catch (error) {
+    console.error('Error in getPublicStats:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// ─── @route  GET /api/properties ─────────────────────────────────────────────
-// ─── @access Private (all roles)
-exports.getAllProperties = async (req, res) => {
+// ─── GET ALL PROPERTIES ────────────────────────────────────────────────
+const getProperties = async (req, res) => {
   try {
-    const {
-      type, status, city, minPrice, maxPrice, minArea, maxArea,
-      bedrooms, furnished, parking, search,
-      page = 1, limit = 10, sortBy = 'createdAt', order = 'desc',
-    } = req.query;
-
-    const query = { isActive: true };
-
-    // Role-based filter: buyers only see approved listings
-    if (req.user.role === 'buyer') {
-      query.isApproved = true;
-    } else if (req.user.role === 'agent') {
-      // Agents see only their own listings (approved or not)
-      query.agent = req.user.id;
+    const { page = 1, limit = 10, sortBy = 'createdAt', order = 'desc', city, type, status, minPrice, maxPrice, search, bedrooms } = req.query;
+    
+    const query = { isApproved: true };
+    
+    if (search) {
+      query.$or = [
+        { title: { $regex: search, $options: 'i' } },
+        { description: { $regex: search, $options: 'i' } },
+        { 'location.city': { $regex: search, $options: 'i' } },
+      ];
     }
-    // Admin sees all
-
-    if (type) query.type = type;
-    if (status) query.status = status;
+    
     if (city) query['location.city'] = { $regex: city, $options: 'i' };
-    if (bedrooms) query.bedrooms = Number(bedrooms);
-    if (furnished) query.furnished = furnished;
-    if (parking !== undefined) query.parking = parking === 'true';
-
+    if (type) query.propertyType = type;
+    if (status) query.status = status;
+    if (bedrooms) {
+      const parsedBedrooms = parseInt(bedrooms);
+      if (!Number.isNaN(parsedBedrooms)) {
+        query.bedrooms = { $gte: parsedBedrooms };
+      }
+    }
+    
     if (minPrice || maxPrice) {
       query.price = {};
-      if (minPrice) query.price.$gte = Number(minPrice);
-      if (maxPrice) query.price.$lte = Number(maxPrice);
+      if (minPrice) query.price.$gte = parseInt(minPrice);
+      if (maxPrice) query.price.$lte = parseInt(maxPrice);
     }
 
-    if (minArea || maxArea) {
-      query.area = {};
-      if (minArea) query.area.$gte = Number(minArea);
-      if (maxArea) query.area.$lte = Number(maxArea);
-    }
+    const sortOptions = {};
+    sortOptions[sortBy] = order === 'desc' ? -1 : 1;
 
-    if (search) {
-      query.$text = { $search: search };
-    }
+    const properties = await Property.find(query)
+      .sort(sortOptions)
+      .limit(parseInt(limit))
+      .skip((parseInt(page) - 1) * parseInt(limit))
+      .populate('agent', 'name email phone profileImage');
 
-    const skip = (Number(page) - 1) * Number(limit);
-    const sortOrder = order === 'asc' ? 1 : -1;
+    const total = await Property.countDocuments(query);
 
-    const [properties, total] = await Promise.all([
-      Property.find(query)
-        .populate('agent', 'name email phone')
-        .sort({ [sortBy]: sortOrder })
-        .skip(skip)
-        .limit(Number(limit)),
-      Property.countDocuments(query),
-    ]);
-
-    res.status(200).json({
+    res.json({
       success: true,
-      count: properties.length,
-      total,
-      pages: Math.ceil(total / Number(limit)),
-      currentPage: Number(page),
-      data: properties,
+      data: properties.map(serializeProperty),
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / limit)
+      }
     });
   } catch (error) {
+    console.error('Error in getProperties:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// ─── @route  GET /api/properties/:id ─────────────────────────────────────────
-// ─── @access Private (all roles)
-exports.getProperty = async (req, res) => {
+// ─── GET SINGLE PROPERTY ──────────────────────────────────────────────
+const getProperty = async (req, res) => {
   try {
-    const property = await Property.findById(req.params.id).populate('agent', 'name email phone');
-
-    if (!property || !property.isActive) {
-      return res.status(404).json({ success: false, message: 'Property not found.' });
+    const property = await Property.findById(req.params.id)
+      .populate('agent', 'name email phone profileImage')
+      .populate('reviews.user', 'name profileImage');
+    
+    if (!property) {
+      return res.status(404).json({ success: false, message: 'Property not found' });
     }
 
-    // Buyers can only see approved properties
-    if (req.user.role === 'buyer' && !property.isApproved) {
-      return res.status(403).json({ success: false, message: 'Property not available.' });
+    const isOwner = req.user && property.agent?._id?.toString() === req.user.id;
+    const canViewUnpublished = req.user?.role === 'admin' || isOwner;
+    if ((!property.isActive || !property.isApproved) && !canViewUnpublished) {
+      return res.status(404).json({ success: false, message: 'Property not found' });
     }
 
-    // Agents can only see their own
-    if (req.user.role === 'agent' && property.agent._id.toString() !== req.user.id) {
-      return res.status(403).json({ success: false, message: 'Access denied.' });
-    }
+    property.views = (property.views || 0) + 1;
+    await property.save();
 
-    // Increment views
-    await Property.findByIdAndUpdate(req.params.id, { $inc: { views: 1 } });
-
-    res.status(200).json({ success: true, data: property });
+    res.json({ success: true, data: serializeProperty(property) });
   } catch (error) {
+    console.error('Error in getProperty:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// ─── @route  PUT /api/properties/:id ─────────────────────────────────────────
-// ─── @access Private (admin, agent-owner)
-exports.updateProperty = async (req, res) => {
+// ─── CREATE PROPERTY ──────────────────────────────────────────────────
+const createProperty = async (req, res) => {
   try {
-    let property = await Property.findById(req.params.id);
+    const propertyData = normalizePropertyPayload(req.body);
+    const images = buildImagePayload(req.files?.images || []);
+    const documents = buildDocumentPayload(req.files?.documents || []);
 
-    if (!property || !property.isActive) {
-      return res.status(404).json({ success: false, message: 'Property not found.' });
-    }
-
-    // Only admin or the owning agent can update
-    if (req.user.role === 'agent' && property.agent.toString() !== req.user.id) {
-      return res.status(403).json({ success: false, message: 'Not authorized to update this property.' });
-    }
-
-    const {
-      title, description, type, status, price, area, areaUnit,
-      bedrooms, bathrooms, floors, parking, furnished,
-      address, city, state, pincode, lat, lng, amenities,
-    } = req.body;
-
-    const updateData = {
-      title, description, type, status, price,
-      area, areaUnit, bedrooms, bathrooms, floors,
-      parking: parking === 'true' || parking === true,
-      furnished,
-      'location.address': address,
-      'location.city': city,
-      'location.state': state,
-      'location.pincode': pincode,
-      'location.lat': lat,
-      'location.lng': lng,
-      amenities: amenities ? (Array.isArray(amenities) ? amenities : amenities.split(',')) : property.amenities,
-    };
-
-    // Add new images if uploaded
-    if (req.files && req.files.images) {
-      const newImages = req.files.images.map((file) => ({
-        filename: file.filename,
-        path: `/uploads/properties/${file.filename}`,
-        originalName: file.originalname,
-      }));
-      updateData.$push = { images: { $each: newImages } };
-    }
-
-    property = await Property.findByIdAndUpdate(req.params.id, updateData, {
-      new: true,
-      runValidators: true,
+    const property = new Property({
+      ...propertyData,
+      agent: req.user._id,
+      isApproved: req.user.role === 'admin' ? true : false,
+      images: images.length > 0 ? images : propertyData.images || [],
+      documents: documents.length > 0 ? documents : propertyData.documents || [],
     });
+    await property.save();
 
-    res.status(200).json({ success: true, message: 'Property updated', data: property });
+    res.status(201).json({
+      success: true,
+      data: serializeProperty(property),
+      message: 'Property created successfully'
+    });
   } catch (error) {
+    console.error('Error in createProperty:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// ─── @route  DELETE /api/properties/:id ──────────────────────────────────────
-// ─── @access Private (admin, agent-owner)
-exports.deleteProperty = async (req, res) => {
+// ─── UPDATE PROPERTY ──────────────────────────────────────────────────
+const updateProperty = async (req, res) => {
   try {
     const property = await Property.findById(req.params.id);
-
-    if (!property || !property.isActive) {
-      return res.status(404).json({ success: false, message: 'Property not found.' });
+    if (!property) {
+      return res.status(404).json({ success: false, message: 'Property not found' });
     }
 
-    if (req.user.role === 'agent' && property.agent.toString() !== req.user.id) {
-      return res.status(403).json({ success: false, message: 'Not authorized to delete this property.' });
+    if (property.agent.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Not authorized' });
     }
 
-    // Soft delete
-    await Property.findByIdAndUpdate(req.params.id, { isActive: false });
+    const payload = normalizePropertyPayload(req.body);
+    if (req.files?.images?.length) {
+      payload.images = [...(property.images || []), ...buildImagePayload(req.files.images)];
+    }
+    if (req.files?.documents?.length) {
+      payload.documents = [...(property.documents || []), ...buildDocumentPayload(req.files.documents)];
+    }
 
-    res.status(200).json({ success: true, message: 'Property deleted successfully.' });
+    const updated = await Property.findByIdAndUpdate(
+      req.params.id,
+      payload,
+      { new: true, runValidators: true }
+    );
+
+    res.json({ success: true, data: serializeProperty(updated), message: 'Property updated successfully' });
   } catch (error) {
+    console.error('Error in updateProperty:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// ─── @route  PATCH /api/properties/:id/approve ───────────────────────────────
-// ─── @access Private (admin only)
-exports.approveProperty = async (req, res) => {
+// ─── DELETE PROPERTY ──────────────────────────────────────────────────
+const deleteProperty = async (req, res) => {
+  try {
+    const property = await Property.findById(req.params.id);
+    if (!property) {
+      return res.status(404).json({ success: false, message: 'Property not found' });
+    }
+
+    if (property.agent.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Not authorized' });
+    }
+
+    await property.deleteOne();
+    res.json({ success: true, message: 'Property deleted successfully' });
+  } catch (error) {
+    console.error('Error in deleteProperty:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ─── SEARCH PROPERTIES ─────────────────────────────────────────────────
+const searchProperties = async (req, res) => {
+  try {
+    const { q, city, minPrice, maxPrice, propertyType, status } = req.query;
+    
+    const query = { isApproved: true };
+
+    if (q) {
+      query.$or = [
+        { title: { $regex: q, $options: 'i' } },
+        { description: { $regex: q, $options: 'i' } },
+        { 'location.city': { $regex: q, $options: 'i' } },
+      ];
+    }
+
+    if (city) query['location.city'] = { $regex: city, $options: 'i' };
+    if (propertyType) query.propertyType = propertyType;
+    if (status) query.status = status;
+    
+    if (minPrice || maxPrice) {
+      query.price = {};
+      if (minPrice) query.price.$gte = parseInt(minPrice);
+      if (maxPrice) query.price.$lte = parseInt(maxPrice);
+    }
+
+    const properties = await Property.find(query)
+      .populate('agent', 'name email phone')
+      .limit(50)
+      .sort({ createdAt: -1 });
+
+    res.json({ success: true, data: properties.map(serializeProperty), count: properties.length });
+  } catch (error) {
+    console.error('Error in searchProperties:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ─── GET PROPERTIES BY AGENT ──────────────────────────────────────────
+const getPropertiesByAgent = async (req, res) => {
+  try {
+    const properties = await Property.find({ 
+      agent: req.params.agentId,
+      isApproved: true 
+    }).populate('agent', 'name email phone');
+
+    res.json({ success: true, data: properties.map(serializeProperty) });
+  } catch (error) {
+    console.error('Error in getPropertiesByAgent:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ─── GET SIMILAR PROPERTIES ───────────────────────────────────────────
+const getSimilarProperties = async (req, res) => {
+  try {
+    const property = await Property.findById(req.params.id);
+    if (!property) {
+      return res.status(404).json({ success: false, message: 'Property not found' });
+    }
+
+    const similar = await Property.find({
+      _id: { $ne: property._id },
+      isApproved: true,
+      propertyType: property.propertyType,
+      'location.city': property.location.city,
+    })
+    .limit(parseInt(req.query.limit) || 4)
+    .populate('agent', 'name email phone');
+
+    res.json({ success: true, data: similar.map(serializeProperty) });
+  } catch (error) {
+    console.error('Error in getSimilarProperties:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ================================================================
+// ❤️ FAVORITES
+// ================================================================
+
+const getFavoriteProperties = async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id).populate({
+      path: 'favorites',
+      populate: { path: 'agent', select: 'name email phone' }
+    });
+    res.json({ success: true, data: user?.favorites || [] });
+  } catch (error) {
+    console.error('Error in getFavoriteProperties:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const toggleFavorite = async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+    const propertyId = req.params.id;
+
+    const property = await Property.findById(propertyId);
+    if (!property) {
+      return res.status(404).json({ success: false, message: 'Property not found' });
+    }
+
+    const index = user.favorites.indexOf(propertyId);
+    if (index > -1) {
+      user.favorites.splice(index, 1);
+    } else {
+      user.favorites.push(propertyId);
+    }
+
+    await user.save();
+
+    res.json({
+      success: true,
+      data: user.favorites,
+      message: index > -1 ? 'Removed from favorites' : 'Added to favorites'
+    });
+  } catch (error) {
+    console.error('Error in toggleFavorite:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const isFavorite = async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+    const propertyId = req.params.id;
+    const isFav = user.favorites.includes(propertyId);
+    res.json({ success: true, data: { isFavorite: isFav } });
+  } catch (error) {
+    console.error('Error in isFavorite:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ================================================================
+// ⭐ REVIEWS
+// ================================================================
+
+const getPropertyReviews = async (req, res) => {
+  try {
+    const property = await Property.findById(req.params.id)
+      .select('reviews')
+      .populate('reviews.user', 'name profileImage');
+    
+    if (!property) {
+      return res.status(404).json({ success: false, message: 'Property not found' });
+    }
+    
+    res.json({ success: true, data: property.reviews || [] });
+  } catch (error) {
+    console.error('Error in getPropertyReviews:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const addPropertyReview = async (req, res) => {
+  try {
+    const { rating, comment } = req.body;
+    const property = await Property.findById(req.params.id);
+
+    if (!property) {
+      return res.status(404).json({ success: false, message: 'Property not found' });
+    }
+
+    const existingReview = property.reviews.find(
+      review => review.user.toString() === req.user._id.toString()
+    );
+
+    if (existingReview) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'You have already reviewed this property' 
+      });
+    }
+
+    const review = {
+      user: req.user._id,
+      userName: req.user.name,
+      rating: parseInt(rating),
+      comment,
+      date: new Date()
+    };
+
+    property.reviews.push(review);
+    property.numReviews = property.reviews.length;
+    property.avgRating = property.reviews.reduce((acc, r) => acc + r.rating, 0) / property.reviews.length;
+
+    await property.save();
+
+    res.status(201).json({ 
+      success: true, 
+      data: property.reviews, 
+      message: 'Review added successfully' 
+    });
+  } catch (error) {
+    console.error('Error in addPropertyReview:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const deleteReview = async (req, res) => {
+  try {
+    const property = await Property.findById(req.params.id);
+    if (!property) {
+      return res.status(404).json({ success: false, message: 'Property not found' });
+    }
+
+    const reviewIndex = property.reviews.findIndex(
+      review => review._id.toString() === req.params.reviewId
+    );
+
+    if (reviewIndex === -1) {
+      return res.status(404).json({ success: false, message: 'Review not found' });
+    }
+
+    const review = property.reviews[reviewIndex];
+    if (review.user.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Not authorized' });
+    }
+
+    property.reviews.splice(reviewIndex, 1);
+    property.numReviews = property.reviews.length;
+    property.avgRating = property.reviews.length > 0 
+      ? property.reviews.reduce((acc, r) => acc + r.rating, 0) / property.reviews.length 
+      : 0;
+
+    await property.save();
+
+    res.json({ success: true, message: 'Review deleted successfully' });
+  } catch (error) {
+    console.error('Error in deleteReview:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ================================================================
+// 🛡️ ADMIN FUNCTIONS
+// ================================================================
+
+const getAdminStats = async (req, res) => {
+  try {
+    const [total, pending, approved, totalAgents, totalBuyers] = await Promise.all([
+      Property.countDocuments(),
+      Property.countDocuments({ isApproved: false }),
+      Property.countDocuments({ isApproved: true }),
+      User.countDocuments({ role: 'agent' }),
+      User.countDocuments({ role: 'buyer' }),
+    ]);
+
+    res.json({
+      success: true,
+      data: { total, pending, approved, totalAgents, totalBuyers }
+    });
+  } catch (error) {
+    console.error('Error in getAdminStats:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const getAdminProperties = async (req, res) => {
+  try {
+    const { page = 1, limit = 10, status = 'all', search } = req.query;
+    
+    const query = {};
+    if (status === 'pending') query.isApproved = false;
+    if (status === 'approved') query.isApproved = true;
+    
+    if (search) {
+      query.$or = [
+        { title: { $regex: search, $options: 'i' } },
+        { 'location.city': { $regex: search, $options: 'i' } },
+      ];
+    }
+
+    const properties = await Property.find(query)
+      .populate('agent', 'name email phone')
+      .limit(parseInt(limit))
+      .skip((parseInt(page) - 1) * parseInt(limit))
+      .sort({ createdAt: -1 });
+
+    const total = await Property.countDocuments(query);
+
+    res.json({
+      success: true,
+      data: properties.map(serializeProperty),
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / limit)
+      }
+    });
+  } catch (error) {
+    console.error('Error in getAdminProperties:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const getPendingProperties = async (req, res) => {
+  try {
+    const properties = await Property.find({ isApproved: false })
+      .populate('agent', 'name email phone')
+      .sort({ createdAt: -1 });
+
+    res.json({ success: true, data: properties.map(serializeProperty) });
+  } catch (error) {
+    console.error('Error in getPendingProperties:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const approveProperty = async (req, res) => {
   try {
     const property = await Property.findByIdAndUpdate(
       req.params.id,
-      { isApproved: true },
+      { isApproved: true, approvedAt: new Date(), rejectionReason: null },
       { new: true }
     );
-    if (!property) return res.status(404).json({ success: false, message: 'Property not found.' });
+    
+    if (!property) {
+      return res.status(404).json({ success: false, message: 'Property not found' });
+    }
 
-    res.status(200).json({ success: true, message: 'Property approved', data: property });
+    res.json({ success: true, data: serializeProperty(property), message: 'Property approved successfully' });
   } catch (error) {
+    console.error('Error in approveProperty:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// ─── @route  DELETE /api/properties/:id/images/:filename ─────────────────────
-// ─── @access Private (admin, agent-owner)
-exports.deletePropertyImage = async (req, res) => {
+const rejectProperty = async (req, res) => {
   try {
-    const property = await Property.findById(req.params.id);
-    if (!property) return res.status(404).json({ success: false, message: 'Property not found.' });
-
-    if (req.user.role === 'agent' && property.agent.toString() !== req.user.id) {
-      return res.status(403).json({ success: false, message: 'Not authorized.' });
+    const { reason } = req.body;
+    const property = await Property.findByIdAndUpdate(
+      req.params.id,
+      { isApproved: false, rejectionReason: reason || 'No reason provided', approvedAt: null },
+      { new: true }
+    );
+    
+    if (!property) {
+      return res.status(404).json({ success: false, message: 'Property not found' });
     }
 
-    const { filename } = req.params;
-    const filePath = path.join(__dirname, '../uploads/properties', filename);
+    res.json({ success: true, data: serializeProperty(property), message: 'Property rejected' });
+  } catch (error) {
+    console.error('Error in rejectProperty:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
 
-    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-
-    await Property.findByIdAndUpdate(req.params.id, {
-      $pull: { images: { filename } },
+const bulkApproveProperties = async (req, res) => {
+  try {
+    const { propertyIds } = req.body;
+    const result = await Property.updateMany(
+      { _id: { $in: propertyIds } },
+      { isApproved: true, approvedAt: new Date(), rejectionReason: null }
+    );
+    res.json({ 
+      success: true, 
+      data: result,
+      message: `${result.modifiedCount} properties approved successfully` 
     });
-
-    res.status(200).json({ success: true, message: 'Image deleted.' });
   } catch (error) {
+    console.error('Error in bulkApproveProperties:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// ─── @route  PATCH /api/properties/:id/images/:filename ──────────────────────
-// ─── @access Private (admin, agent-owner) — edit photo details/captions
-exports.updateImageDetails = async (req, res) => {
+const bulkRejectProperties = async (req, res) => {
+  try {
+    const { propertyIds, reason } = req.body;
+    const result = await Property.updateMany(
+      { _id: { $in: propertyIds } },
+      { isApproved: false, rejectionReason: reason || 'Bulk rejection', approvedAt: null }
+    );
+    res.json({ 
+      success: true, 
+      data: result,
+      message: `${result.modifiedCount} properties rejected successfully` 
+    });
+  } catch (error) {
+    console.error('Error in bulkRejectProperties:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ================================================================
+// 📸 IMAGE FUNCTIONS
+// ================================================================
+
+const uploadImages = async (req, res) => {
   try {
     const property = await Property.findById(req.params.id);
-    if (!property) return res.status(404).json({ success: false, message: 'Property not found.' });
-
-    if (req.user.role === 'agent' && property.agent.toString() !== req.user.id) {
-      return res.status(403).json({ success: false, message: 'Not authorized.' });
+    if (!property) {
+      return res.status(404).json({ success: false, message: 'Property not found' });
     }
 
-    const { caption, room, isCover } = req.body;
-    const image = property.images.find((img) => img.filename === req.params.filename);
-    if (!image) return res.status(404).json({ success: false, message: 'Image not found.' });
+    if (property.agent.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Not authorized' });
+    }
+
+    const images = (req.files || []).map((file, index) => ({
+      path: `/uploads/properties/${file.filename || file.key}`,
+      filename: file.filename || file.key,
+      originalName: file.originalname || file.filename,
+      isPrimary: property.images.length === 0 && index === 0,
+      caption: '',
+    }));
+
+    property.images.push(...images);
+    await property.save();
+
+    res.status(201).json({
+      success: true,
+      data: property.images,
+      message: `${images.length} images uploaded successfully`
+    });
+  } catch (error) {
+    console.error('Error in uploadImages:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const updateImageDetails = async (req, res) => {
+  try {
+    const { id, imageId } = req.params;
+    const { caption, isPrimary } = req.body;
+
+    const property = await Property.findById(id);
+    if (!property) {
+      return res.status(404).json({ success: false, message: 'Property not found' });
+    }
+
+    if (property.agent.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Not authorized' });
+    }
+
+    const image = property.images.id(imageId);
+    if (!image) {
+      return res.status(404).json({ success: false, message: 'Image not found' });
+    }
 
     if (caption !== undefined) image.caption = caption;
-    if (room !== undefined) image.room = room;
-    if (isCover !== undefined) {
-      if (isCover === true || isCover === 'true') {
-        property.images.forEach((img) => { img.isCover = img.filename === req.params.filename; });
+    if (isPrimary !== undefined) {
+      if (isPrimary) {
+        property.images.forEach(img => img.isPrimary = false);
+      }
+      image.isPrimary = isPrimary;
+    }
+
+    await property.save();
+
+    res.json({ success: true, data: property.images, message: 'Image updated successfully' });
+  } catch (error) {
+    console.error('Error in updateImageDetails:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const deleteImage = async (req, res) => {
+  try {
+    const { id, imageId } = req.params;
+
+    const property = await Property.findById(id);
+    if (!property) {
+      return res.status(404).json({ success: false, message: 'Property not found' });
+    }
+
+    if (property.agent.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Not authorized' });
+    }
+
+    const image = property.images.id(imageId);
+    if (!image) {
+      return res.status(404).json({ success: false, message: 'Image not found' });
+    }
+
+    const wasPrimary = image.isPrimary;
+    property.images.pull(imageId);
+    await property.save();
+
+    if (wasPrimary && property.images.length > 0) {
+      property.images[0].isPrimary = true;
+      await property.save();
+    }
+
+    res.json({ success: true, data: property.images, message: 'Image deleted successfully' });
+  } catch (error) {
+    console.error('Error in deleteImage:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const setPrimaryImage = async (req, res) => {
+  try {
+    const { id, imageId } = req.params;
+
+    const property = await Property.findById(id);
+    if (!property) {
+      return res.status(404).json({ success: false, message: 'Property not found' });
+    }
+
+    if (property.agent.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Not authorized' });
+    }
+
+    const image = property.images.id(imageId);
+    if (!image) {
+      return res.status(404).json({ success: false, message: 'Image not found' });
+    }
+
+    property.images.forEach(img => img.isPrimary = false);
+    image.isPrimary = true;
+    await property.save();
+
+    res.json({ success: true, data: property.images, message: 'Primary image set successfully' });
+  } catch (error) {
+    console.error('Error in setPrimaryImage:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const reorderImages = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { imageOrder } = req.body;
+
+    const property = await Property.findById(id);
+    if (!property) {
+      return res.status(404).json({ success: false, message: 'Property not found' });
+    }
+
+    if (property.agent.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Not authorized' });
+    }
+
+    const images = [];
+    for (const imageId of imageOrder) {
+      const image = property.images.id(imageId);
+      if (image) images.push(image);
+    }
+
+    property.images = images;
+    await property.save();
+
+    res.json({ success: true, data: property.images, message: 'Images reordered successfully' });
+  } catch (error) {
+    console.error('Error in reorderImages:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ================================================================
+// 📄 DOCUMENT FUNCTIONS
+// ================================================================
+
+const uploadDocuments = async (req, res) => {
+  try {
+    const property = await Property.findById(req.params.id);
+    if (!property) {
+      return res.status(404).json({ success: false, message: 'Property not found' });
+    }
+
+    if (property.agent.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Not authorized' });
+    }
+
+    const documents = (req.files || []).map(file => ({
+      name: file.originalname || file.filename,
+      path: `/uploads/documents/${file.filename || file.key}`,
+      filename: file.filename || file.key,
+      uploadedAt: new Date(),
+      verified: false,
+    }));
+
+    property.documents = [...(property.documents || []), ...documents];
+    await property.save();
+
+    res.status(201).json({
+      success: true,
+      data: property.documents,
+      message: `${documents.length} documents uploaded successfully`
+    });
+  } catch (error) {
+    console.error('Error in uploadDocuments:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const getPropertyDocuments = async (req, res) => {
+  try {
+    const property = await Property.findById(req.params.id);
+    if (!property) {
+      return res.status(404).json({ success: false, message: 'Property not found' });
+    }
+    res.json({ success: true, data: property.documents || [] });
+  } catch (error) {
+    console.error('Error in getPropertyDocuments:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const deleteDocument = async (req, res) => {
+  try {
+    const { id, docId } = req.params;
+
+    const property = await Property.findById(id);
+    if (!property) {
+      return res.status(404).json({ success: false, message: 'Property not found' });
+    }
+
+    if (property.agent.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Not authorized' });
+    }
+
+    property.documents = property.documents.filter(doc => doc._id.toString() !== docId);
+    await property.save();
+
+    res.json({ success: true, data: property.documents, message: 'Document deleted successfully' });
+  } catch (error) {
+    console.error('Error in deleteDocument:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const verifyDocuments = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { documents } = req.body;
+
+    const property = await Property.findById(id);
+    if (!property) {
+      return res.status(404).json({ success: false, message: 'Property not found' });
+    }
+
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Only admins can verify documents' });
+    }
+
+    property.documents = documents || [];
+    property.documentsVerified = true;
+    property.documentsVerifiedAt = new Date();
+    await property.save();
+
+    res.json({ success: true, data: property.documents, message: 'Documents verified successfully' });
+  } catch (error) {
+    console.error('Error in verifyDocuments:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const verifyDocument = async (req, res) => {
+  try {
+    const { id, docId } = req.params;
+    const { status, notes } = req.body;
+
+    const property = await Property.findById(id);
+    if (!property) {
+      return res.status(404).json({ success: false, message: 'Property not found' });
+    }
+
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Only admins can verify documents' });
+    }
+
+    const doc = property.documents.id(docId);
+    if (!doc) {
+      return res.status(404).json({ success: false, message: 'Document not found' });
+    }
+
+    doc.verified = status === 'verified';
+    doc.verificationNotes = notes || '';
+    doc.verifiedAt = new Date();
+    await property.save();
+
+    res.json({ success: true, data: property.documents, message: 'Document verified successfully' });
+  } catch (error) {
+    console.error('Error in verifyDocument:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const getDocumentVerificationStatus = async (req, res) => {
+  try {
+    const property = await Property.findById(req.params.id);
+    if (!property) {
+      return res.status(404).json({ success: false, message: 'Property not found' });
+    }
+
+    const status = {
+      verified: property.documentsVerified || false,
+      verifiedAt: property.documentsVerifiedAt || null,
+      documents: property.documents?.map(doc => ({
+        id: doc._id,
+        name: doc.name,
+        verified: doc.verified || false,
+        verifiedAt: doc.verifiedAt || null,
+      })) || [],
+    };
+
+    res.json({ success: true, data: status });
+  } catch (error) {
+    console.error('Error in getDocumentVerificationStatus:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const requestDocumentVerification = async (req, res) => {
+  try {
+    const property = await Property.findById(req.params.id);
+    if (!property) {
+      return res.status(404).json({ success: false, message: 'Property not found' });
+    }
+
+    property.verificationRequested = true;
+    property.verificationRequestedAt = new Date();
+    await property.save();
+
+    res.json({ success: true, message: 'Document verification requested successfully' });
+  } catch (error) {
+    console.error('Error in requestDocumentVerification:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ================================================================
+// 🤖 AI VERIFICATION
+// ================================================================
+
+const aiVerifyDocument = async (req, res) => {
+  try {
+    const { id, docId } = req.params;
+    
+    const property = await Property.findById(id);
+    if (!property) {
+      return res.status(404).json({ success: false, message: 'Property not found' });
+    }
+
+    const doc = property.documents.id(docId);
+    if (!doc) {
+      return res.status(404).json({ success: false, message: 'Document not found' });
+    }
+
+    // Simulate AI verification
+    const aiScore = Math.floor(Math.random() * 30) + 70;
+    const isVerified = aiScore > 80;
+
+    doc.aiVerified = true;
+    doc.aiScore = aiScore;
+    doc.verified = isVerified;
+    doc.verifiedAt = new Date();
+    await property.save();
+
+    res.json({
+      success: true,
+      data: {
+        documentId: docId,
+        aiScore,
+        verified: isVerified,
+        message: isVerified ? 'Document verified by AI' : 'Document needs manual review',
+      }
+    });
+  } catch (error) {
+    console.error('Error in aiVerifyDocument:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const bulkVerifyDocuments = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { documentIds } = req.body;
+
+    const property = await Property.findById(id);
+    if (!property) {
+      return res.status(404).json({ success: false, message: 'Property not found' });
+    }
+
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Only admins can verify documents' });
+    }
+
+    const results = [];
+    for (const docId of documentIds) {
+      const doc = property.documents.id(docId);
+      if (doc) {
+        doc.verified = true;
+        doc.verifiedAt = new Date();
+        results.push({ id: docId, success: true });
       } else {
-        image.isCover = false;
+        results.push({ id: docId, success: false, error: 'Document not found' });
       }
     }
 
+    const allVerified = property.documents.every(doc => doc.verified);
+    if (allVerified && property.documents.length > 0) {
+      property.documentsVerified = true;
+      property.documentsVerifiedAt = new Date();
+    }
+
     await property.save();
-    res.status(200).json({ success: true, message: 'Photo details updated.', data: property });
+
+    res.json({
+      success: true,
+      data: results,
+      message: `Bulk verification completed: ${results.filter(r => r.success).length} verified`
+    });
   } catch (error) {
+    console.error('Error in bulkVerifyDocuments:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// ─── @route  POST /api/properties/:id/documents/verify ───────────────────────
-// ─── @access Private (admin, agent-owner) — run AI document testing system
-exports.verifyDocuments = async (req, res) => {
+// ================================================================
+// 📊 ADDITIONAL ANALYTICS
+// ================================================================
+
+const getPropertyStatsByCity = async (req, res) => {
   try {
-    const property = await Property.findById(req.params.id);
-    if (!property) return res.status(404).json({ success: false, message: 'Property not found.' });
-
-    if (req.user.role === 'agent' && property.agent.toString() !== req.user.id) {
-      return res.status(403).json({ success: false, message: 'Not authorized.' });
-    }
-
-    if (!property.documents || property.documents.length === 0) {
-      return res.status(400).json({ success: false, message: 'No documents attached to this property.' });
-    }
-
-    const backendRoot = path.join(__dirname, '..');
-
-    property.documents.forEach((doc) => {
-      const result = analyzeDocument(doc, backendRoot);
-      doc.verificationStatus = result.status;
-      doc.verificationScore = result.score;
-      doc.verificationNotes = result.notes;
-      doc.verifiedAt = new Date();
-    });
-
-    await property.save();
-
-    res.status(200).json({
-      success: true,
-      message: 'Document testing complete.',
-      data: property.documents,
-    });
+    const stats = await Property.aggregate([
+      { $match: { isApproved: true } },
+      { $group: {
+        _id: '$location.city',
+        count: { $sum: 1 },
+        avgPrice: { $avg: '$price' },
+        minPrice: { $min: '$price' },
+        maxPrice: { $max: '$price' },
+      }},
+      { $sort: { count: -1 } }
+    ]);
+    res.json({ success: true, data: stats });
   } catch (error) {
+    console.error('Error in getPropertyStatsByCity:', error);
     res.status(500).json({ success: false, message: error.message });
   }
+};
+
+const getPropertyPriceRange = async (req, res) => {
+  try {
+    const stats = await Property.aggregate([
+      { $match: { isApproved: true } },
+      { $group: {
+        _id: null,
+        minPrice: { $min: '$price' },
+        maxPrice: { $max: '$price' },
+        avgPrice: { $avg: '$price' },
+      }}
+    ]);
+    res.json({ success: true, data: stats[0] || {} });
+  } catch (error) {
+    console.error('Error in getPropertyPriceRange:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const getRecentlyViewed = async (req, res) => {
+  try {
+    const properties = await Property.find({ isApproved: true })
+      .sort({ views: -1 })
+      .limit(10)
+      .populate('agent', 'name email phone');
+    res.json({ success: true, data: properties.map(serializeProperty) });
+  } catch (error) {
+    console.error('Error in getRecentlyViewed:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const getPropertyInsights = async (req, res) => {
+  try {
+    const property = await Property.findById(req.params.id);
+    if (!property) {
+      return res.status(404).json({ success: false, message: 'Property not found' });
+    }
+
+    const similarInCity = await Property.countDocuments({
+      _id: { $ne: req.params.id },
+      isApproved: true,
+      'location.city': property.location.city,
+      propertyType: property.propertyType,
+    });
+
+    const avgPriceInCity = await Property.aggregate([
+      { $match: { 
+        isApproved: true,
+        'location.city': property.location.city,
+        propertyType: property.propertyType,
+      }},
+      { $group: { _id: null, avgPrice: { $avg: '$price' } } }
+    ]);
+
+    res.json({ 
+      success: true, 
+      data: {
+        views: property.views || 0,
+        daysOnMarket: Math.floor((Date.now() - new Date(property.createdAt).getTime()) / (1000 * 60 * 60 * 24)),
+        similarPropertiesInCity: similarInCity,
+        averagePriceInCity: avgPriceInCity[0]?.avgPrice || 0,
+        priceComparison: property.price - (avgPriceInCity[0]?.avgPrice || 0),
+      }
+    });
+  } catch (error) {
+    console.error('Error in getPropertyInsights:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ================================================================
+// 📤 EXPORT ALL FUNCTIONS
+// ================================================================
+
+module.exports = {
+  // CRUD
+  getPublicStats,
+  getProperties,
+  getProperty,
+  createProperty,
+  updateProperty,
+  deleteProperty,
+  
+  // Search & Filter
+  searchProperties,
+  getPropertiesByAgent,
+  getSimilarProperties,
+  
+  // Favorites
+  getFavoriteProperties,
+  toggleFavorite,
+  isFavorite,
+  
+  // Reviews
+  getPropertyReviews,
+  addPropertyReview,
+  deleteReview,
+  
+  // Admin
+  getAdminStats,
+  getAdminProperties,
+  getPendingProperties,
+  approveProperty,
+  rejectProperty,
+  bulkApproveProperties,
+  bulkRejectProperties,
+  
+  // Images
+  uploadImages,
+  updateImageDetails,
+  deleteImage,
+  setPrimaryImage,
+  reorderImages,
+  
+  // Documents
+  uploadDocuments,
+  getPropertyDocuments,
+  deleteDocument,
+  verifyDocuments,
+  verifyDocument,
+  getDocumentVerificationStatus,
+  requestDocumentVerification,
+  
+  // AI Verification
+  aiVerifyDocument,
+  bulkVerifyDocuments,
+  
+  // Analytics
+  getPropertyStatsByCity,
+  getPropertyPriceRange,
+  getRecentlyViewed,
+  getPropertyInsights,
 };

@@ -21,7 +21,7 @@ const userSchema = new mongoose.Schema(
       type: String,
       required: [true, 'Password is required'],
       minlength: [6, 'Password must be at least 6 characters'],
-      select: false, // Never return password in queries
+      select: false,
     },
     role: {
       type: String,
@@ -36,10 +36,32 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    googleId: {
+      type: String,
+      default: null,
+    },
+    isVerified: {
+      type: Boolean,
+      default: false,
+    },
     isActive: {
       type: Boolean,
       default: true,
     },
+    passwordResetToken: {
+      type: String,
+      select: false,
+    },
+    passwordResetExpire: {
+      type: Date,
+      select: false,
+    },
+    favorites: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Property',
+      },
+    ],
   },
   { timestamps: true }
 );

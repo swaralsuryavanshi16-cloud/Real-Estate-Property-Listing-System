@@ -3,13 +3,36 @@ import * as authApi from "../api/auth";
 
 const AuthContext = createContext(null);
 
+function readStoredUser() {
+  const storedUser = localStorage.getItem("re_user") || localStorage.getItem("user");
+
+  if (!storedUser) return null;
+
+  try {
+    return JSON.parse(storedUser);
+  } catch {
+    localStorage.removeItem("re_user");
+    localStorage.removeItem("user");
+    return null;
+  }
+}
+
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(() => {
-    const storedUser = localStorage.getItem("re_user");
-    return storedUser ? JSON.parse(storedUser) : null;
-  });
+  const [user, setUser] = useState(readStoredUser);
 
   const [loading, setLoading] = useState(true);
+
+  const setAuthUser = useCallback((nextUser) => {
+    setUser(nextUser);
+
+    if (nextUser) {
+      localStorage.setItem("re_user", JSON.stringify(nextUser));
+      localStorage.setItem("user", JSON.stringify(nextUser));
+    } else {
+      localStorage.removeItem("re_user");
+      localStorage.removeItem("user");
+    }
+  }, []);
 
   // ================= LOGIN =================
 
@@ -17,9 +40,9 @@ export function AuthProvider({ children }) {
     const { data } = await authApi.login(credentials);
 
     localStorage.setItem("re_token", data.token);
-    localStorage.setItem("re_user", JSON.stringify(data.user));
+    localStorage.setItem("token", data.token);
 
-    setUser(data.user);
+    setAuthUser(data.user);
 
     return data;
   };
@@ -31,9 +54,9 @@ export function AuthProvider({ children }) {
     const { data } = await authApi.register(payload);
 
     localStorage.setItem("re_token", data.token);
-    localStorage.setItem("re_user", JSON.stringify(data.user));
+    localStorage.setItem("token", data.token);
 
-    setUser(data.user);
+    setAuthUser(data.user);
 
     return data;
   };
@@ -46,10 +69,10 @@ export function AuthProvider({ children }) {
     } catch (err) {}
 
     localStorage.removeItem("re_token");
-    localStorage.removeItem("re_user");
+    localStorage.removeItem("token");
 
-    setUser(null);
-  }, []);
+    setAuthUser(null);
+  }, [setAuthUser]);
 
   // ============== REFRESH USER ==============
 
@@ -64,18 +87,13 @@ export function AuthProvider({ children }) {
 
       const { data } = await authApi.getMe();
 
-      localStorage.setItem(
-        "re_user",
-        JSON.stringify(data.data)
-      );
-
-      setUser(data.data);
+      setAuthUser(data.data);
     } catch (err) {
       logout();
     } finally {
       setLoading(false);
     }
-  }, [logout]);
+  }, [logout, setAuthUser]);
 
   useEffect(() => {
     refreshUser();
@@ -90,6 +108,7 @@ export function AuthProvider({ children }) {
         register,
         logout,
         refreshUser,
+        setAuthUser,
 
         isAdmin: user?.role === "admin",
         isAgent: user?.role === "agent",

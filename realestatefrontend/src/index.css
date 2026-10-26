@@ -7,7 +7,17 @@
 }
 
 body {
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: 'Manrope', 'Avenir Next', 'Segoe UI', sans-serif;
+  color: #172033;
+  background: #f6f8fb;
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
 }
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -85,6 +95,63 @@ body {
   --theme-name: 'Rose';
 }
 
+/* Dashboard role palettes. These scoped rules re-skin shared dashboard
+   surfaces while keeping the three portal identities distinct. */
+.dashboard-shell.dashboard-admin {
+  --dashboard-main: #8f1838;
+  --dashboard-dark: #64102b;
+  --dashboard-soft: #fff1f2;
+  --dashboard-accent: #f59e0b;
+}
+
+.dashboard-shell.dashboard-agent {
+  --dashboard-main: #075985;
+  --dashboard-dark: #164e63;
+  --dashboard-soft: #ecfeff;
+  --dashboard-accent: #22d3ee;
+}
+
+.dashboard-shell.dashboard-buyer {
+  --dashboard-main: #047857;
+  --dashboard-dark: #065f46;
+  --dashboard-soft: #ecfdf5;
+  --dashboard-accent: #fbbf24;
+}
+
+.dashboard-shell .dashboard-welcome {
+  background: linear-gradient(135deg, var(--dashboard-dark), var(--dashboard-main));
+  box-shadow: 0 25px 50px -12px color-mix(in srgb, var(--dashboard-main) 30%, transparent);
+}
+
+.dashboard-shell .dashboard-featured {
+  background: linear-gradient(135deg, var(--dashboard-main), var(--dashboard-dark));
+  box-shadow: 0 25px 50px -12px color-mix(in srgb, var(--dashboard-main) 30%, transparent);
+}
+
+.dashboard-shell .dashboard-stat {
+  border-color: color-mix(in srgb, var(--dashboard-main) 18%, white);
+}
+
+.dashboard-shell .dashboard-stat-icon {
+  background: linear-gradient(135deg, var(--dashboard-main), var(--dashboard-dark));
+}
+
+.dashboard-shell .dashboard-stat-value {
+  background-image: linear-gradient(90deg, var(--dashboard-main), var(--dashboard-dark));
+}
+
+.dashboard-shell .text-indigo-600 {
+  color: var(--dashboard-main);
+}
+
+.dashboard-shell .bg-indigo-50 {
+  background-color: var(--dashboard-soft);
+}
+
+.dashboard-shell .text-indigo-100 {
+  color: color-mix(in srgb, white 82%, var(--dashboard-main));
+}
+
 /* Leaflet map polish */
 .leaflet-container {
   font-family: 'Inter', system-ui, sans-serif;
@@ -96,11 +163,11 @@ body {
 
 @layer components {
   .btn-primary {
-    @apply bg-primary-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-primary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply bg-primary-600 text-white px-4 py-2.5 rounded-lg font-semibold shadow-sm hover:bg-primary-700 hover:shadow-md transition-all disabled:opacity-50 disabled:cursor-not-allowed;
   }
 
   .btn-secondary {
-    @apply bg-white text-primary-600 border border-primary-600 px-4 py-2 rounded-lg font-medium hover:bg-primary-50 transition-colors;
+    @apply bg-white text-primary-700 border border-gray-200 px-4 py-2.5 rounded-lg font-semibold hover:border-primary-300 hover:bg-primary-50 transition-all;
   }
 
   .btn-danger {
@@ -108,11 +175,15 @@ body {
   }
 
   .input-field {
-    @apply w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent;
+    @apply w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 transition-colors;
   }
 
   .card {
-    @apply bg-white rounded-xl shadow-sm border border-gray-100;
+    @apply bg-white rounded-xl shadow-sm border border-gray-200;
+  }
+
+  .glass-panel {
+    @apply bg-white border border-gray-200 shadow-sm rounded-xl;
   }
 
   .badge-approved {

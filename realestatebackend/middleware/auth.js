@@ -1,6 +1,8 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 
+const jwtSecret = process.env.JWT_SECRET || 'realpro-dev-secret-change-me';
+
 // ─── Protect: verify JWT token ─────────────────────────────────────────────
 const protect = async (req, res, next) => {
   let token;
@@ -21,7 +23,7 @@ const protect = async (req, res, next) => {
   }
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, jwtSecret);
     const user = await User.findById(decoded.id).select('-password');
 
     if (!user) {
@@ -62,4 +64,33 @@ const authorize = (...roles) => {
   };
 };
 
-module.exports = { protect, authorize };
+// ─── Optional Auth: attach user if token exists, but don't require it ──────
+const optionalAuth = async (req, res, next) => {
+  let token;
+
+  if (
+    req.headers.authorization &&
+    req.headers.authorization.startsWith('Bearer ')
+  ) {
+    token = req.headers.authorization.split(' ')[1];
+  }
+
+  if (!token) {
+    return next(); // no token — just continue as guest
+  }
+
+  try {
+    const decoded = jwt.verify(token, jwtSecret);
+    const user = await User.findById(decoded.id).select('-password');
+
+    if (user && user.isActive) {
+      req.user = user;
+    }
+  } catch (error) {
+    // invalid/expired token — ignore and continue as guest
+  }
+
+  next();
+};
+
+module.exports = { protect, authorize, optionalAuth };

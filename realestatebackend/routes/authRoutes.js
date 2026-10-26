@@ -1,4 +1,3 @@
-
 const express = require("express");
 const router = express.Router();
 
@@ -8,16 +7,11 @@ const {
   getMe,
   updateProfile,
   changePassword,
-  logout,
-} = require("../controllers/authController");
-
-const {
-  sendOTP,
-  verifyOTP,
-  resendOTP,
   forgotPassword,
   resetPassword,
-} = require("../controllers/otpController");
+  logout,
+  googleRegister,
+} = require("../controllers/authController");
 
 const { protect } = require("../middleware/auth");
 const { uploadAvatar } = require("../middleware/upload");
@@ -26,27 +20,43 @@ const { uploadAvatar } = require("../middleware/upload");
 // Public Authentication Routes
 // ==============================
 
-// OTP Routes
-router.post("/send-otp", sendOTP);
-router.post("/verify-otp", verifyOTP);
-router.post("/resend-otp", resendOTP);
-
-// Registration & Login
+// @route  POST /api/auth/register
+// @desc   Register a new user
+// @access Public
 router.post("/register", register);
+
+// @route  POST /api/auth/login
+// @desc   Login user
+// @access Public
 router.post("/login", login);
 
-// Password Reset
+// @route  POST /api/auth/google-register
+// @desc   Register/Login with Google
+// @access Public
+router.post("/google-register", googleRegister);
+
+// @route  POST /api/auth/forgot-password
+// @desc   Initiate password reset flow
+// @access Public
 router.post("/forgot-password", forgotPassword);
+
+// @route  POST /api/auth/reset-password
+// @desc   Reset password
+// @access Public
 router.post("/reset-password", resetPassword);
 
 // ==============================
-// Protected Routes
+// Protected Routes (Authentication Required)
 // ==============================
 
-// User Profile
+// @route  GET /api/auth/me
+// @desc   Get current user profile
+// @access Private
 router.get("/me", protect, getMe);
 
-// Update Profile
+// @route  PUT /api/auth/updateprofile
+// @desc   Update user profile
+// @access Private
 router.put(
   "/updateprofile",
   protect,
@@ -54,10 +64,17 @@ router.put(
   updateProfile
 );
 
-// Change Password
+// @route  PUT /api/auth/changepassword
+// @desc   Change user password
+// @access Private
 router.put("/changepassword", protect, changePassword);
 
-// Logout
+// @route  GET /api/auth/logout
+// @desc   Logout user
+// @access Private
 router.get("/logout", protect, logout);
 
+// ==============================
+// ✅ EXPORT ROUTER
+// ==============================
 module.exports = router;

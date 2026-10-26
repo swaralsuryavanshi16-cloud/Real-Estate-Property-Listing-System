@@ -104,6 +104,18 @@ const propertySchema = new mongoose.Schema(
       default: true,
     },
     views: { type: Number, default: 0 },
+    reviews: [
+      {
+        user: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'User',
+        },
+        userName: String,
+        rating: { type: Number, required: true, min: 1, max: 5 },
+        comment: String,
+        date: { type: Date, default: Date.now },
+      },
+    ],
   },
   { timestamps: true }
 );
